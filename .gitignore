@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .opencode/
 .benchmarks/
+diario.md
+diario2.md
+preprint/

@@ -1,0 +1,323 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=2.4cm}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\definecolor{ghostblue}{HTML}{1F4E79}
+\definecolor{ghostaccent}{HTML}{C55A11}
+\definecolor{okgreen}{HTML}{2E7D32}
+\definecolor{warngold}{HTML}{E65100}
+\definecolor{riskred}{HTML}{B71C1C}
+\definecolor{palegreen}{HTML}{C8E6C9}
+\definecolor{paleamber}{HTML}{FFECB3}
+\definecolor{palered}{HTML}{FFCDD2}
+\definecolor{paleblue}{HTML}{D6E4F0}
+\definecolor{palegray}{HTML}{ECEFF1}
+\hypersetup{colorlinks=true,linkcolor=ghostblue,citecolor=ghostblue,urlcolor=ghostaccent}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\title{\textcolor{ghostblue}{Il Fantasma v0.02: dalla cancellazione dichiarata alla scomparsa misurata}\\ \large Crypto-shredding, audit scrypt, finestra temporale ed evidenza su GSM8K}
+\author{dr.\ Francesco Bulla --- Bologna, 10/10/2026}
+\date{Preprint locale, bozza non pubblicata --- v0.02}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Nella v0.01 il Fantasma ``scompariva'' per dichiarazione: svuotare due dizionari
+in Python. Questa nota trasforma la cancellazione in una propriet\`a misurabile.
+Definiamo tre livelli di sparizione (L1 store applicativi, L2 memoria del processo,
+L3 terze parti e provider), sostituiamo l'offuscamento con crypto-shredding in sola
+stdlib, l'impegno HMAC con scrypt memory-hard, il codice a 13 cifre con 19 cifre
+canoniche, e aggiungiamo una finestra temporale dichiarata che risolve il paradosso
+verificabile-versus-riservato invece di aggirarlo. Ogni garanzia \`e condizionata al
+proprio report di misura: 44 test verdi, scansione del filesystem, controllo positivo
+e negativo obbligatori, misura su Linux via Docker. Su 50 problemi GSM8K con
+DeepSeek-V4.1-Flash il Fantasma ottiene 47/50 contro 46/50 del diretto e del CoT
+nascosto, con audit verificato e amnesia completa in tutti i giri. Il segnale \`e
+debole e lo dichiariamo: \`e un pilota, non una prova. Il campo per la v0.03 \`e pronto.
+\end{abstract}
+
+\section{Cos'\`e il Fantasma e perch\'e \`e diverso}
+Il Fantasma \`e uno strato di ragionamento interno che emerge prima della generazione,
+produce un pensiero in un codice numerico privato, lo fa rileggere dallo stesso modello,
+riformula la richiesta e poi distrugge la chiave che rende il pensiero leggibile.
+L'utente vede solo l'output finale; l'audit vede solo impegni, mai contenuti.
+
+\begin{center}
+\begin{tabular}{llll}
+\rowcolor{ghostblue}\textcolor{white}{Approccio} & \textcolor{white}{Pensiero} & \textcolor{white}{Cancellazione} & \textcolor{white}{Chi pu\`o rileggerlo} \\
+\midrule
+CoT visibile & nel testo & nessuna & chiunque \\
+Scratchpad nascosto & nascosto all'utente & svuotamento dichiarato & operatore, provider \\
+Latent reasoning & vettori continui & nessuna & chi ha i pesi \\
+\rowcolor{palegreen}\textbf{Fantasma v0.02} & codice a 19 cifre & \textbf{distruzione di chiave} & nessuno dopo T \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+La differenza non \`e dove il pensiero sta, ma \textbf{come muore}: non per dimenticanza,
+per distruzione del materiale che lo rende leggibile. Il resto --- la riformulazione ---
+sopravvive per scelta: \`e l'utilit\`a del Fantasma, non una perdita.
+
+\section{Il problema: la scomparsa era una frase}
+Misure della revisione sul prototipo v0.01: il codice generato a runtime lascia
+3 copie nella memoria del processo, 4 se tenuto in un unico \texttt{bytearray},
+10 durante la costruzione del prompt, 8 dopo wipe pi\`u garbage collector.
+Con il codice scritto come letterale nel sorgente, 31 copie: ogni f-string, log,
+traceback, richiesta HTTP e buffer di socket ne crea una. E lo shift delle cifre
+della v0.01 \`e un Cesare a 10 possibilit\`a: si legge a mano. Da qui il threat model,
+una pagina, tre livelli:
+
+\begin{center}
+\begin{tabular}{lll}
+\rowcolor{ghostblue}\textcolor{white}{Livello} & \textcolor{white}{Promessa} & \textcolor{white}{Stato v0.02} \\
+\midrule
+\rowcolor{palegreen}L1 --- applicativo & nessun riferimento negli store e nei file & garantito e misurato \\
+\rowcolor{paleamber}L2 --- processo & nessuna copia inattesa nella RAM ispezionabile & misurato, mai garantito \\
+\rowcolor{palered}L3 --- provider e rete & nessuna copia da nessuna parte & mai affermato \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize,
+  tappa/.style={rectangle, draw, rounded corners, align=center, text width=3.4cm, minimum height=1.2cm}]
+\node[tappa, fill=palegreen, draw=okgreen, thick] (l1) {\textbf{L1} \\ store + filesystem \\ R = 0 misurato};
+\node[tappa, fill=paleamber, draw=warngold, thick, right=0.8cm of l1] (l2) {\textbf{L2} \\ RAM ispezionabile \\ ridotto e misurato};
+\node[tappa, fill=palered, draw=riskred, thick, right=0.8cm of l2] (l3) {\textbf{L3} \\ provider, rete, kernel \\ dichiarato, non garantito};
+\draw[->, thick, ghostaccent] (l1) -- (l2);
+\draw[->, thick, ghostaccent] (l2) -- (l3);
+\end{tikzpicture}
+\caption{I tre livelli di sparizione. Solo L1 \`e una garanzia; L2 \`e una misura; L3 \`e un limite dichiarato.}
+\end{figure}
+
+Su 43 bit --- 13 cifre --- verificabile e non-invertibile sono mutuamente esclusivi:
+se il commitment \`e verificabile, chiunque pu\`o enumerare $10^{13}$ candidati e aprirlo.
+La v0.02 prende entrambe le uscite: alza l'entropia a 19 cifre e dichiara la finestra T.
+
+\section{Architettura v0.02: cosa cambia davvero}
+\texttt{src/fantasma}: \texttt{secret.py} (\texttt{SecretBytes} in bytearray wipabile,
+\texttt{OneTimeKey}, \texttt{SecretRegion} con wipe per costruzione anche su eccezione),
+\texttt{crypto.py} (encrypt-then-MAC in stdlib su bytearray, scrypt, \texttt{TimedCommitment}),
+\texttt{ghost\_window.py} (guard rail contro il fork accidentale, rilascio del traceback),
+\texttt{hygiene.py} (mlock puntuale sulla regione, mai mlockall),
+\texttt{forensics.py} (canary runtime, 7 codifiche, scan di store e filesystem,
+R come copie inattese, claim condizionale), \texttt{pipeline\_v02.py} (stessa
+interfaccia \texttt{.process()}, interno nuovo), \texttt{bench\_gsm8k.py} (harness GSM8K).
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=1.0cm, auto,
+  blocco/.style={rectangle, draw=ghostblue, fill=paleblue, thick, rounded corners, text width=2.0cm, align=center, font=\scriptsize},
+  evoca/.style={rectangle, draw=warngold, fill=paleamber, thick, rounded corners, text width=2.0cm, align=center, font=\scriptsize},
+  chiude/.style={rectangle, draw=okgreen, fill=palegreen, thick, rounded corners, text width=2.0cm, align=center, font=\scriptsize},
+  freccia/.style={->, thick, ghostaccent}]
+\node[blocco] (in) {Input};
+\node[blocco, right=of in] (gate) {Gate};
+\node[evoca, right=of gate] (ghost) {Codice 19 cifre in Secret};
+\node[evoca, below=of ghost] (interp) {Stessa AI interpreta (1 decode)};
+\node[evoca, left=of interp] (seal) {Blob sigillato + scrypt};
+\node[blocco, left=of seal] (ref) {Riformula};
+\node[blocco, below=of ref] (out) {Output};
+\node[chiude, right=of out] (amn) {Wipe + destroy chiave};
+\draw[freccia] (in) -- (gate);
+\draw[freccia] (gate) -- (ghost);
+\draw[freccia] (ghost) -- (interp);
+\draw[freccia] (interp) -- (seal);
+\draw[freccia] (seal) -- (ref);
+\draw[freccia] (ref) -- (out);
+\draw[freccia] (out) -- (amn);
+\end{tikzpicture}
+\caption{Ciclo v0.02. La cache contiene solo blob indecifrabili; la chiave muore con memset.}
+\end{figure}
+
+\textbf{Codice canonico a 19 cifre (63,1 bit), mai intero.} Lo zero iniziale \`e
+significativo; le serializzazioni come numero sono intercettate dalle varianti
+\texttt{int-decimal} e \texttt{int-hex} dello scanner.
+
+\textbf{Scrypt misurato, non sperato.} N$=2^{14}$, r$=8$, p$=1$: mediana a regime
+$\sim$44~ms per tentativo su un core, $\sim$14.000 anni/core su $10^{13}$.
+Ma scrypt \`e bandwidth-bound: su 1 GPU $\sim$3,2 anni per 13 cifre, su 100 GPU
+$\sim$12 giorni. A 19 cifre: milioni di anni anche su GPU. Il numero per-core non
+\`e la difesa; la difesa \`e l'entropia.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+\draw[->] (0,0) -- (7.2,0) node[right] {bit di entropia};
+\fill[riskred!45] (0,2.6) rectangle (1.73,3.0) node[midway, above=2pt] {13 cifre: 43,2};
+\fill[warngold!55] (0,2.0) rectangle (2.13,2.4) node[midway, above=2pt] {16 cifre: 53,2};
+\fill[okgreen] (0,1.4) rectangle (2.52,1.8) node[midway, above=2pt, white] {\textbf{19 cifre: 63,1}};
+\fill[ghostblue!35] (0,0.8) rectangle (5.12,1.2) node[midway, above=2pt] {32 hex: 128};
+\node[anchor=west] at (0,0.2) {13 cifre: enumerabile (giorni su 100 GPU). 19 cifre: fuori portata.};
+\end{tikzpicture}
+\caption{La leva vera \`e l'entropia, non il KDF. Su 43 bit verificabile e riservato si escludono.}
+\end{figure}
+
+\textbf{Finestra temporale dichiarata.} Entro T il commitment \`e verificabile via tag
+keyed a chiave viva; dopo \texttt{expire()} resta solo scrypt one-way. \`E la voce
+``limiti temporali'' della Visione, applicata all'audit: verificabile entro T,
+senso unico dopo T.
+
+\textbf{Wipe per costruzione.} \texttt{SecretRegion} fa memset via ctypes in
+\texttt{\_\_exit\_\_} sempre, anche su return anticipata o eccezione. Misurato:
+riferimento trattenuto pi\`u return anticipata danno comunque buffer zerato.
+\texttt{expose\_mutable()} resta API di basso livello; la pipeline passa dal manager.
+
+\textbf{Igiene puntuale.} Niente mlockall: solo mlock sulla regione del secret con
+report per-pagina. Il report dice ``regione designata protetta'', mai ``niente in
+swap'': le copie fuori regione non sono lockate. Il claim L2 pretende lock riuscito
+pi\`u core dump off pi\`u scan a zero, altrimenti non \`e affermato.
+
+\section{Claim condizionale: garanzia contro evidenza}
+Una garanzia \`e una frase con la guardia davanti. \texttt{evaluate\_claim()}:
+L1 affermabile sempre sui propri store; L2 solo con hygiene verde e scan pulito;
+L3 mai. R $=$ copie trovate meno copie legittime dichiarate: lo scanner possiede
+il canary per cercarlo, quella copia si sottrae, altrimenti R misura se stesso.
+Controllo positivo e negativo obbligatori a ogni run: senza positivo che trova la
+leak iniettata, R$=$0 non significa niente. ``Non trovato'' vale solo per le sette
+codifiche cercate: raw, UTF-16LE/BE, hex, base64, int-decimal, int-hex.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+\draw[->] (0,0) -- (7,0) node[right] {tempo};
+\draw[ghostblue, ultra thick] (0.5,0.6) -- (4.0,0.6) node[midway, above] {finestra T: verificabile (tag keyed vivo)};
+\fill[ghostblue] (0.5,0.6) circle (2.5pt) node[below] {sigillo};
+\fill[riskred] (4.0,0.6) circle (2.5pt) node[below] {expire: chiave distrutta};
+\draw[riskred, thick, dashed] (4.0,0.6) -- (6.8,0.6) node[midway, above] {dopo T: solo scrypt one-way};
+\end{tikzpicture}
+\caption{Il paradosso risolto invece che aggirato: verificabile entro T, senso unico dopo T.}
+\end{figure}
+
+\section{Limiti misurati, non nascosti}
+\texttt{bytes} non si sovrascrive, \texttt{bytearray} s\`i: la chiave vive in buffer
+mutabile, il drop del riferimento \`e igiene, non cancellazione. \texttt{del} e
+\texttt{gc} liberano senza azzerare: L1 a zero vale per gli store, non per la RAM.
+Lo scrub di \texttt{f\_locals} \`e write-through solo da Python 3.13 e solo su frame
+attivi: sui frame sospesi in traceback la scrittura non si propaga (misurato, 0
+verificato); la via robusta resta \texttt{finally} pi\`u rilascio del traceback.
+\texttt{ghost\_window} impedisce il fork accidentale da codice Python, non \`e una
+barriera contro subprocess o estensioni C; su Windows fork non esiste e lo start
+method \`e spawn. AES-GCM via OpenSSL copia il plaintext in C: per il claim di
+sparizione la stdlib in-place \`e architetturalmente migliore, e la migrazione ad
+AEAD resta prevista in v1.0. Su Windows senza \texttt{/proc} e senza mlock, L2 \`e
+non-misurabile e non affermato: \`e la guardia che lavora, non un fallimento.
+
+Misura Docker (Linux 6.6 WSL2, Python 3.11.17, hygiene verde, lock su 19 byte),
+canary a 19 cifre, regioni di memoria contenenti il canary:
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+\draw[->] (0,0) -- (0,3.4) node[above] {regioni con raw};
+\draw (0,0) -- (7.5,0);
+\fill[ghostblue!55] (0.5,0) rectangle (1.7,1.4) node[midway, above=2pt] {2};
+\node at (1.1,-0.25) {baseline};
+\fill[ghostblue!55] (2.2,0) rectangle (3.4,2.8) node[midway, above=2pt] {4};
+\node at (2.8,-0.25) {decode};
+\fill[ghostblue!55] (3.9,0) rectangle (5.1,2.8) node[midway, above=2pt] {4};
+\node at (4.5,-0.25) {prompt};
+\fill[warngold] (5.6,0) rectangle (6.8,2.8) node[midway, above=2pt, white] {\textbf{4}};
+\node at (6.2,-0.25) {wipe+gc};
+\end{tikzpicture}
+\caption{L2 non torna a zero: baseline 2, dopo decode 4, dopo wipe e gc ancora 4. Ridotto e misurato.}
+\end{figure}
+
+\section{Evidenza: GSM8K a 50}
+Harness in \texttt{src/fantasma/bench\_gsm8k.py}: 50 problemi del test set, seed
+fisso 20261010, tre bracci sullo stesso DeepSeek-V4.1-Flash con stesso formato
+finale \texttt{\#\#\#\# numero}. Risultati in \texttt{outputs/benchmark/}.
+
+\begin{center}
+\begin{tabular}{lccc}
+\rowcolor{ghostblue}\textcolor{white}{Braccio} & \textcolor{white}{Accuratezza} & \textcolor{white}{Tempo medio} & \textcolor{white}{Note} \\
+\midrule
+Direct & 46/50 = 0.920 & 2.6 s & una chiamata \\
+CoT nascosto & 46/50 = 0.920 & 2.8 s & una chiamata \\
+\rowcolor{palegreen}\textbf{Fantasma v0.02} & \textbf{47/50 = 0.940} & 10.7 s & due chiamate + sigillo \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+\draw[->] (0,0) -- (0,4.4) node[above] {accuratezza};
+\draw (0,0) -- (7.5,0);
+\fill[palegray] (0.8,0) rectangle (2.0,3.68) node[midway, above=2pt] {0.920};
+\draw[ghostblue, thick] (0.8,0) rectangle (2.0,3.68);
+\node at (1.4,-0.25) {direct};
+\fill[palegray] (2.8,0) rectangle (4.0,3.68) node[midway, above=2pt] {0.920};
+\draw[ghostblue, thick] (2.8,0) rectangle (4.0,3.68);
+\node at (3.4,-0.25) {nascosto};
+\fill[okgreen] (4.8,0) rectangle (6.0,3.76) node[midway, above=2pt, white] {\textbf{0.940}};
+\node at (5.4,-0.25) {fantasma};
+\end{tikzpicture}
+\caption{GSM8K a 50: una tacca sopra, a pari modello. Pilota, non prova.}
+\end{figure}
+
+Lato garanzie sul giro fantasma: ghost attivo 48/50 (2 standby legittimi),
+audit verificato 50/50, memoria e cache vuote 50/50, formato valido sempre.
+Un solo problema separa i bracci --- gold 54, fantasma giusto, gli altri a 27
+sbagliati insieme --- e nessun caso dove il fantasma sbaglia da solo. Con un
+modello gi\`a al 92\% il segnale \`e debole per costruzione: lo dichiariamo pilota.
+
+\section{Cosa cambia dalla v0.01}
+Cesare $\to$ shredding stdlib; HMAC nudo $\to$ scrypt; 13 cifre $\to$ 19 canoniche;
+drop del riferimento $\to$ memset per costruzione; mlockall $\to$ mlock puntuale;
+``scompare'' $\to$ L1/L2/L3 con guardie; audit senza finestra $\to$ finestra T;
+12 test $\to$ 44 test; nessun benchmark $\to$ GSM8K a 50 con tre bracci.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize]
+\draw[->, ghostblue, thick] (0,0) -- (7,0) node[right] {privacy cognitiva};
+\draw[->, ghostblue, thick] (0,0) -- (0,4) node[above] {verificabilit\`a};
+\draw[ghostaccent, ultra thick] (0.5,3.5) .. controls (3,3) and (4,1) .. (6.5,0.5);
+\fill[warngold] (0.7,3.4) circle (3pt) node[above right] {CoT visibile};
+\fill[riskred] (3.4,2.0) circle (3pt) node[above right] {Fantasma v0.02: misurato};
+\fill[ghostblue] (6.2,0.6) circle (3pt) node[above] {black box};
+\end{tikzpicture}
+\caption{Stessa curva della v0.01, ma il punto del Fantasma ora ha coordinate misurate.}
+\end{figure}
+
+\section{Verso la v0.03: il campo preparato}
+La domanda resta senza risposta dalla prima nota: il Fantasma migliora davvero
+le risposte rispetto al CoT nascosto? Il campo \`e pronto: harness a tre bracci,
+seed fissi, formato validato. La v0.03 allarga a 200 problemi con campionamento
+stratificato sui casi dove il diretto sbaglia, aggiunge significativit\`a statistica,
+prova il modello locale open-weights dove L3 si restringe, e introduce la
+supervisione indipendente del gate con reset selettivo. Il resto --- supervisione,
+limiti temporali estesi, biforcazione locale/remoto --- \`e la roadmap v1.0.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\scriptsize,
+  tappa/.style={rectangle, draw=ghostblue, thick, rounded corners, align=center, text width=2.6cm}]
+\node[tappa, fill=palegray] (v1) {v0.01 \\ prototipo + live};
+\node[tappa, fill=paleamber, draw=ghostaccent, right=0.7cm of v1] (v2) {\textbf{v0.02} \\ scomparsa misurata + GSM8K 50};
+\node[tappa, fill=paleblue, right=0.7cm of v2] (v3) {v0.03 \\ 200 stratificati + locale};
+\node[tappa, fill=palegreen, draw=okgreen, right=0.7cm of v3] (v4) {v1.0 \\ supervisione + reset};
+\draw[->, thick, ghostaccent] (v1) -- (v2);
+\draw[->, thick, ghostaccent] (v2) -- (v3);
+\draw[->, thick, ghostaccent] (v3) -- (v4);
+\end{tikzpicture}
+\caption{Roadmap aggiornata: la misura c'\`e, ora la significativit\`a.}
+\end{figure}
+
+\section{Stato e riproducibilit\`a}
+44 test verdi (\texttt{pytest tests/}), 12 originali intatti. Misure L2 su Linux
+6.6 WSL2, Python 3.11.17, Docker con memlock sbloccato; misure applicative su
+Windows 10.0.26200, Python 3.13.13. Dataset \texttt{openai/gsm8k} split test,
+seed 20261010, modello \texttt{deepseek-flash} con \texttt{reasoning\_effort=high}.
+Chiave solo da env, mai nel codice. Altrimenti resta nel quaderno: questa, per ora,
+misura invece di promettere.
+\end{document}

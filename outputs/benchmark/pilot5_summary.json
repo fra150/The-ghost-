@@ -1,0 +1,25 @@
+{
+  "tag": "pilot5",
+  "n": 5,
+  "seed": 20261010,
+  "arms": [
+    "direct",
+    "hidden",
+    "fantasma"
+  ],
+  "accuracy": {
+    "direct": 0.6,
+    "hidden": 0.6,
+    "fantasma": 0.8
+  },
+  "correct": {
+    "direct": 3,
+    "hidden": 3,
+    "fantasma": 4
+  },
+  "counted": {
+    "direct": 5,
+    "hidden": 5,
+    "fantasma": 5
+  }
+}

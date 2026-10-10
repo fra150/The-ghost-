@@ -1,0 +1,20 @@
+{
+  "tag": "gsm8k_50",
+  "n": 50,
+  "seed": 20261010,
+  "arms": [
+    "direct",
+    "hidden",
+    "fantasma"
+  ],
+  "accuracy": {
+    "direct": 0.92,
+    "hidden": 0.92,
+    "fantasma": 0.94
+  },
+  "correct": {
+    "direct": 46,
+    "hidden": 46,
+    "fantasma": 47
+  }
+}

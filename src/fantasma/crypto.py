@@ -204,7 +204,9 @@ class CryptoShredder:
     def seal(self, plaintext: bytes | bytearray) -> SealedBlob:
         """Sigilla usando SecretRegion: wipe per costruzione, anche su eccezione."""
         if self._key.is_destroyed:
-            raise ValueError("Shredder distrutto: non sigilla piu'.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Shredder distrutto: il catenaccio e' chiuso (non sigilla piu').")
         pt = bytes(plaintext)
         audit_salt = secrets.token_bytes(16)
         try:
@@ -234,7 +236,9 @@ class CryptoShredder:
 
     def open(self, blob: SealedBlob) -> bytes:
         if self._key.is_destroyed:
-            raise ValueError("Chiave distrutta: blob irrecuperabile (e' la garanzia).")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Chiave distrutta: blob irrecuperabile (e' la garanzia, catenaccio chiuso).")
         with self._key.region() as k_mut:
             return open_with_key(k_mut, blob.nonce, blob.ciphertext, blob.tag)
 

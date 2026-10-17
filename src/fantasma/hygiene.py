@@ -96,6 +96,58 @@ def unlock_secret_region(buf: bytearray) -> bool:
         return False
 
 
+def secure_wipe_buffer(buf: bytearray | memoryview) -> None:
+    """Azzera un buffer mutabile. v0.04 P1: refactor centralizzato.
+
+    NOTA ONESTA (non presentarlo nel paper come miglioramento di L2):
+    ctypes.memset e' gia' una chiamata opaca via FFI che nessun compilatore
+    puo' elidere. Il valore qui e' centralizzare i 4 loop di wipe copiati
+    (SecretBytes/OneTimeKey/SecretRegion/CryptoShredder) in un punto unico.
+    Tenta explicit_bzero (Linux) / SecureZeroMemory (Windows) dove esportati,
+    altrimenti memset deterministico. `from_buffer` pinna il resize: il
+    riferimento C viene rilasciato in finally.
+    """
+    if not isinstance(buf, (bytearray, memoryview)):
+        raise TypeError("Il buffer deve essere mutabile (bytearray o memoryview).")
+    n = len(buf)
+    if n == 0:
+        return
+    c_buf = None
+    try:
+        c_buf = (ctypes.c_char * n).from_buffer(buf)
+        wiped = False
+        if sys.platform.startswith("linux"):
+            try:
+                libc = ctypes.CDLL("libc.so.6")
+                if hasattr(libc, "explicit_bzero"):
+                    libc.explicit_bzero(c_buf, n)
+                    wiped = True
+            except (AttributeError, OSError):
+                pass
+        elif sys.platform == "win32":
+            try:
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                for name in ("RtlSecureZeroMemory", "SecureZeroMemory"):
+                    fn = getattr(kernel32, name, None)
+                    if fn is not None:
+                        try:
+                            fn(c_buf, n)
+                            wiped = True
+                            break
+                        except Exception:
+                            continue
+            except (AttributeError, OSError):
+                pass
+        if not wiped:
+            ctypes.memset(c_buf, 0, n)
+    finally:
+        # Rilascia il pin sul buffer (sblocca il resize del bytearray).
+        try:
+            del c_buf
+        except Exception:
+            pass
+
+
 # alias storici (stessa semantica puntuale)
 def lock_buffer(buf: bytearray) -> bool:
     return bool(lock_secret_region(buf).get("locked", False))

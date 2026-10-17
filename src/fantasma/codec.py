@@ -83,14 +83,18 @@ class PrivateNumericCodec:
         """
         Prompt con cui LA STESSA AI rilegge il proprio codice.
         Il raw numerico vive solo qui, nel giro di interpretazione.
+        v0.04: coda rigida condivisa con reform_guard (stessi divieti).
         """
+        try:
+            from .reform_guard import CALL1_RIGID_TAIL as _TAIL
+        except Exception:
+            _TAIL = "sola direttiva di riformulazione (nessuna cifra, nessun codice)."
         return (
             f"{INTERPRET_MARKER}\n"
             f"Sei la stessa intelligenza che ha generato questo pensiero privato.\n"
             f"Codice fantasma: {thought.numeric_code}\n"
             f"Richiesta originale: {(original_input or '').strip()}\n"
-            f"Interpreta il codice con il tuo stato interno e restituisci "
-            f"solo una direttiva di riformulazione (nessuna cifra, nessun codice)."
+            f"{_TAIL}"
         )
 
     def interpret(self, thought: GhostThought) -> list[float]:

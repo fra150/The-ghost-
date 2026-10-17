@@ -129,6 +129,50 @@ def release_traceback(exc: BaseException) -> None:
         exc.__traceback__ = None  # type: ignore
     except Exception:
         pass
+    for attr in ("last_traceback", "last_value", "last_type"):
+        try:
+            if hasattr(sys, attr):
+                delattr(sys, attr)
+        except Exception:
+            pass
+
+
+def scrub_traceback(exc: BaseException, depth_limit: int = 16) -> int:
+    """Best-effort v0.04: tenta frame.clear() solo su frame gia' srotolati.
+
+    LIMITI NOTI (non presentarlo come zeroing):
+    - solleva RuntimeError su frame in esecuzione/sospesi: ogni chiamata e'
+      avvolta in try/except individuale, un fallimento non blocca gli altri;
+    - clear() fa solo DECREF dei riferimenti, non azzera la memoria fisica:
+      il wipe esplicito di SecretBytes/OneTimeKey DEVE avvenire prima;
+    - il meccanismo primario resta release_traceback() (rilascio via GC).
+    Ritorna il numero di frame effettivamente puliti.
+    """
+    cleaned = 0
+    try:
+        tb = exc.__traceback__
+    except Exception:
+        return 0
+    steps = 0
+    while tb is not None and steps < depth_limit:
+        try:
+            frame = tb.tb_frame
+            try:
+                frame.clear()  # type: ignore[attr-defined]
+                cleaned += 1
+            except RuntimeError:
+                pass  # frame attivo/sospeso: non pulibile, dichiarato
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            tb = tb.tb_next
+        except Exception:
+            break
+        steps += 1
+    release_traceback(exc)
+    return cleaned
 
 
 def install_scrubbing_excepthook() -> None:

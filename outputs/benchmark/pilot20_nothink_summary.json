@@ -1,0 +1,80 @@
+{
+  "tag": "pilot20_nothink",
+  "n": 20,
+  "seed": 20261010,
+  "model": "qwen2.5:1.5b[no-think][np=128]",
+  "arms": [
+    "direct",
+    "hidden",
+    "fantasma"
+  ],
+  "design": {
+    "mode": "random",
+    "seed": 20261010
+  },
+  "alpha": 0.05,
+  "accuracy": {
+    "direct": 0.0,
+    "hidden": 0.0,
+    "fantasma": 0.0
+  },
+  "correct": {
+    "direct": 0,
+    "hidden": 0,
+    "fantasma": 0
+  },
+  "latency": {
+    "direct": {
+      "mean": 5.3,
+      "p95": 6.7
+    },
+    "hidden": {
+      "mean": 4.0,
+      "p95": 6.4
+    },
+    "fantasma": {
+      "mean": 7.0,
+      "p95": 10.8
+    }
+  },
+  "tokens": {
+    "direct": {
+      "eval": 1737,
+      "prompt_eval": 2144
+    },
+    "hidden": {
+      "eval": 1124,
+      "prompt_eval": 2604
+    },
+    "fantasma": {
+      "eval": 998,
+      "prompt_eval": 6589
+    }
+  },
+  "stats": {
+    "fantasma_vs_direct": {
+      "b": 0,
+      "c": 0,
+      "chi2": 0.0,
+      "p": 1.0,
+      "method": "no-discordant",
+      "significant": false
+    },
+    "bootstrap_fvd": {
+      "diff": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "iters": 10000
+    },
+    "fantasma_vs_hidden": {
+      "b": 0,
+      "c": 0,
+      "chi2": 0.0,
+      "p": 1.0,
+      "method": "no-discordant",
+      "significant": false
+    }
+  }
+}

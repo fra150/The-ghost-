@@ -2,3 +2,5 @@ pytest>=8.0
 openai>=1.0
 python-dotenv>=1.0
 cryptography>=42.0
+ollama>=0.4
+datasets>=3.0

@@ -1,6 +1,6 @@
 # Moduli — riferimento (`src/fantasma/`)
 
-Versione package: `0.2.0-dev`. Tutti i simboli sono riesportati in `__init__.py`.
+Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`.
 
 ## Nucleo v0.02
 
@@ -67,3 +67,24 @@ Versione package: `0.2.0-dev`. Tutti i simboli sono riesportati in `__init__.py`
   `direct` (1 chiamata) vs `hidden` (CoT privato nascosto) vs `fantasma`
   (pipeline v0.02); scoring exact-match su `#### <numero>`;
   artefatti JSONL + summary in `outputs/benchmark/`.
+
+## Cover pre-CoT v0.05
+
+- **`pii_cover.py`** — `cover_text()` (regex + checksum stdlib: CF, PIVA,
+  IBAN mod-97, carte Luhn, email, telefoni; solo checksum validi: le
+  quantita' nude restano intatte), placeholder `[PII_TAG_N]` stabili per
+  valore, `CoverMapping` (bytearray wipabili, `restore`, `residual_scan`,
+  `wipe`, riuso = `UseAfterDestroyError`), `cover_open_classes_with_local_model`
+  (sperimentale: solo modelli open in locale, match esatto, righe inventate
+  ignorate). Limiti: senza checksum non si copre, classi aperte restano in
+  chiaro senza strato open-class.
+- **`pipeline_v02.py` + `cover_pii=True`** — `process()` copre prima del gate,
+  il modello vede solo placeholder, `_cover_finish()` ripristina in locale +
+  residual scan + bolt `cover:<uid>` + wipe (garantito anche sui raise);
+  audit solo su hash del coperto. Default `False`: comportamento invariato.
+- **`overcover_ref.py`** — riferimento falsi positivi del criterio di
+  copertura (consegnato col documento di correzione, citato nel paper
+  corretto §6): `count_false_positives()` (seed 20261010, 20 000 numeri per
+  lunghezza, intervallo pieno senza zeri iniziali), `reference_rates()`,
+  `count_strict_spans()` (conteggi per tag, mai contenuto), CLI con
+  `--corpus`. Conteggi: 2030/1956/1999 = 10,15%/9,8%/10,0%.

@@ -28,6 +28,8 @@ class SecretBytes:
     - mai esposto come attributo pubblico;
     - __repr__/__str__ non rivelano nulla;
     - pickle/copy bloccati per evitare copie inconsapevoli.
+    - v0.04: cast numerici bloccati (int/index/float): il codice non e'
+      mai un intero (zero iniziale significativo, 63,1 bit).
     """
 
     __slots__ = ("_buf", "_destroyed")
@@ -48,6 +50,28 @@ class SecretBytes:
     def from_ascii_digits(cls, digits: bytes) -> "SecretBytes":
         # digits: es. b"0984567345679..." — MAI str
         return cls.from_bytes(digits)
+
+    @classmethod
+    def from_canonical_19(cls, buf: bytearray) -> "SecretBytes":
+        """Prende OWNERSHIP di un bytearray gia' validato a 19 cifre ASCII.
+
+        Nessuna copia, nessuna conversione intermedia: il chiamante non deve
+        piu' toccare `buf` dopo questa chiamata.
+        """
+        validate_canonical_19(buf)
+        obj = cls.__new__(cls)
+        obj._buf = buf
+        obj._destroyed = False
+        return obj
+
+    def __int__(self) -> int:
+        raise TypeError("Vietato convertire SecretBytes in intero (perde lo zero iniziale).")
+
+    def __index__(self) -> int:
+        raise TypeError("SecretBytes non e' indicizzabile come intero.")
+
+    def __float__(self) -> float:
+        raise TypeError("Vietato convertire SecretBytes in float.")
 
     def __len__(self) -> int:
         return len(self._buf) if not self._destroyed else 0
@@ -78,7 +102,9 @@ class SecretBytes:
     def expose_copy(self) -> bytes:
         """Copia bytes esplicita. Usare solo al boundary (es. chiamata LLM) e cancellare subito."""
         if self._destroyed:
-            raise ValueError("Secret distrutto.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Secret distrutto: il catenaccio e' chiuso (riuso rilevato).")
         return bytes(self._buf)
 
     def decode_at_boundary(self) -> str:
@@ -95,33 +121,45 @@ class SecretBytes:
         Il chiamante DEVE fare `del s` subito dopo l'uso, una sola chiamata.
         """
         if self._destroyed:
-            raise ValueError("Secret distrutto.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Secret distrutto: il catenaccio e' chiuso (riuso rilevato).")
         return bytes(self._buf).decode("ascii")
 
     def commitment(self) -> str:
         """sha256 del contenuto, per audit senza rivelare nulla."""
         if self._destroyed:
-            raise ValueError("Secret distrutto: commitment non ricalcolabile (tenere quello in audit).")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Secret distrutto: commitment non ricalcolabile (tenere quello in audit).")
         return hashlib.sha256(bytes(self._buf)).hexdigest()
 
     def is_zeroed(self) -> bool:
         return all(b == 0 for b in self._buf)
 
-    def wipe(self) -> None:
-        """Azzeramento a singola passata 0x00 + flag.
+    def wipe(self) -> bool:
+        """Azzeramento a singola passata 0x00 + flag. Ritorna True se ha
+        wipato ora, False se era gia' distrutto (idempotente ma rilevabile).
 
         Una passata basta su memoria moderna; le 3 passate non aggiungono
         sicurezza su RAM/swap attuali. In Python l'assegnamento su bytearray
         non viene ottimizzato via (niente elisione come in C), ma resta il
         vincolo vero: il wipe cancella QUESTO buffer, non le copie str/bytes
-        create altrove (vedi decode_at_boundary)."""
+        create altrove (vedi decode_at_boundary).
+        v0.04: usa secure_wipe_buffer centralizzato (stessa semantica)."""
         if self._destroyed:
-            return
+            return False
         try:
-            for i in range(len(self._buf)):
-                self._buf[i] = 0x00
+            try:
+                from .hygiene import secure_wipe_buffer as _wipe
+
+                _wipe(self._buf)
+            except Exception:
+                for i in range(len(self._buf)):
+                    self._buf[i] = 0x00
         finally:
             self._destroyed = True
+        return True
 
     def __del__(self):  # best-effort, mai alzare
         try:
@@ -160,7 +198,9 @@ class OneTimeKey:
     def expose(self) -> bytes:
         """Copia bytes esplicita (immutabile, NON wipabile). Preferire expose_mutable()."""
         if self._destroyed:
-            raise ValueError("Chiave distrutta.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Chiave distrutta: il catenaccio e' chiuso (riuso rilevato).")
         return bytes(self._buf)
 
     def expose_mutable(self) -> bytearray:
@@ -170,7 +210,9 @@ class OneTimeKey:
         usare SecretRegion (context manager) — wipe sempre, anche su eccezione
         o return anticipata. Vedi punto rosso 3 della revisione."""
         if self._destroyed:
-            raise ValueError("Chiave distrutta.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Chiave distrutta: il catenaccio e' chiuso (riuso rilevato).")
         return bytearray(self._buf)
 
     def region(self) -> "SecretRegion":
@@ -179,15 +221,22 @@ class OneTimeKey:
         la chiave interna resta viva fino a destroy(). Senza copia, il memset
         distruggerebbe la chiave al primo seal (bug)."""
         if self._destroyed:
-            raise ValueError("Chiave distrutta.")
+            from .bolt import UseAfterDestroyError as _BoltErr
+
+            raise _BoltErr("Chiave distrutta: il catenaccio e' chiuso (riuso rilevato).")
         return SecretRegion(bytearray(self._buf))
 
     def destroy(self) -> str:
         """Azzera la chiave (singola passata, vedi SecretBytes.wipe). Ritorna commitment."""
         if not self._destroyed:
             try:
-                for i in range(len(self._buf)):
-                    self._buf[i] = 0x00
+                try:
+                    from .hygiene import secure_wipe_buffer as _wipe
+
+                    _wipe(self._buf)
+                except Exception:
+                    for i in range(len(self._buf)):
+                        self._buf[i] = 0x00
             finally:
                 self._destroyed = True
         return self._commitment
@@ -228,11 +277,9 @@ class SecretRegion:
 
     def __exit__(self, *exc) -> bool:
         try:
-            import ctypes as _ct
+            from .hygiene import secure_wipe_buffer as _wipe
 
-            n = len(self._b)
-            if n:
-                _ct.memset((_ct.c_char * n).from_buffer(self._b), 0, n)
+            _wipe(self._b)
         except Exception:
             try:
                 for i in range(len(self._b)):
@@ -240,3 +287,69 @@ class SecretRegion:
             except Exception:
                 pass
         return False
+
+
+CODE_DIGITS = 19  # canonico v0.04: 63,1 bit nominali se uniforme
+
+
+def validate_canonical_19(buf: bytes | bytearray) -> None:
+    """Valida 19 cifre ASCII direttamente sul buffer, senza copie str/int.
+
+    Controlla byte a byte (0x30-0x39). Non crea mai str/int dell'intero
+    codice: `bytes(buf)` qui sotto e' solo vista per il confronto, mai
+    convertita in numero.
+    """
+    if len(buf) != CODE_DIGITS:
+        raise ValueError(f"Il codice deve avere esattamente {CODE_DIGITS} cifre, non {len(buf)}.")
+    for b in buf:
+        if b < 0x30 or b > 0x39:
+            raise ValueError("Il codice deve contenere solo cifre ASCII 0-9.")
+
+
+def digest_to_canonical_19(digest: bytes) -> bytearray:
+    """Deriva 19 cifre uniformi da un digest, con rejection sampling.
+
+    v0.04: sostituisce il vecchio `f"{b:03d}"` troncato (biasato).
+    Ogni byte del digest (o dei blocchi SHA256 a catena se servono piu'
+    byte) con valore >= 250 viene scartato, gli altri danno % 10.
+    Scrive le cifre ASCII direttamente nel bytearray, senza mai formare
+    int o str dell'intero codice.
+    Deterministico a parita' di digest (il fantasma resta legato all'input).
+    """
+    out = bytearray(CODE_DIGITS)
+    pos = 0
+    ctr = 0
+    seed = bytes(digest)
+    while pos < CODE_DIGITS:
+        block = hashlib.sha256(seed + ctr.to_bytes(4, "big")).digest()
+        ctr += 1
+        for b in block:
+            if b >= 250:
+                continue
+            out[pos] = 0x30 + (b % 10)
+            pos += 1
+            if pos >= CODE_DIGITS:
+                break
+    del seed
+    return out
+
+
+def random_canonical_19() -> bytearray:
+    """Genera 19 cifre uniformi da CSPRNG, senza int/str dell'intero codice.
+
+    Usa secrets.token_bytes a blocchi + rejection sampling (>= 250 scartato),
+    scrive le cifre ASCII direttamente nel bytearray. MAI secrets.randbelow
+    sull'intero 10**19 (creerebbe un int non azzerabile con l'intero codice).
+    Il chiamante deve trasferire subito l'ownership a SecretBytes.
+    """
+    out = bytearray(CODE_DIGITS)
+    pos = 0
+    while pos < CODE_DIGITS:
+        for b in secrets.token_bytes(32):
+            if b >= 250:
+                continue
+            out[pos] = 0x30 + (b % 10)
+            pos += 1
+            if pos >= CODE_DIGITS:
+                break
+    return out

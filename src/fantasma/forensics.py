@@ -30,8 +30,26 @@ import secrets
 
 
 def generate_runtime_canary(n_digits: int = 19) -> bytes:
-    """Canary numerico ASCII generato a runtime. MAI scriverlo come letterale."""
-    return "".join(str(secrets.randbelow(10)) for _ in range(n_digits)).encode("ascii")
+    """Canary numerico ASCII generato a runtime. MAI scriverlo come letterale.
+
+    v0.04: rejection sampling da token_bytes direttamente in bytearray,
+    senza formare int/str dell'intero codice (stessa regola del segreto).
+    """
+    from .secret import random_canonical_19
+
+    if int(n_digits) == 19:
+        return bytes(random_canonical_19())
+    out = bytearray(int(n_digits))
+    pos = 0
+    while pos < len(out):
+        for b in secrets.token_bytes(32):
+            if b >= 250:
+                continue
+            out[pos] = 0x30 + (b % 10)
+            pos += 1
+            if pos >= len(out):
+                break
+    return bytes(out)
 
 
 def count_needle_in_heap_via_gc(needle: bytes) -> int:

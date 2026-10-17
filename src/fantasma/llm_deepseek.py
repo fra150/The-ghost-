@@ -54,6 +54,19 @@ def _normalize_model(name: str) -> str:
 
 def get_config() -> dict:
     load_env()
+    def _f(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, str(default)).strip() or default)
+        except (ValueError, AttributeError):
+            return default
+    def _i(name: str) -> int | None:
+        raw = (os.environ.get(name, "") or "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
     return {
         "api_key": os.environ.get("DEEPSEEK_API_KEY", "").strip(),
         "base_url": os.environ.get("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL).strip() or DEFAULT_BASE_URL,
@@ -64,6 +77,11 @@ def get_config() -> dict:
         "system": os.environ.get(
             "DEEPSEEK_SYSTEM", "You are a helpful assistant"
         ).strip() or "You are a helpful assistant",
+        # v0.04 P0 determinismo: default 0.0/1.0 documentato come RICHIESTO,
+        # mai come garantito (thinking puo' ignorarlo — vedi bench).
+        "temperature": _f("DEEPSEEK_TEMPERATURE", 0.0),
+        "top_p": _f("DEEPSEEK_TOP_P", 1.0),
+        "seed": _i("DEEPSEEK_SEED"),
     }
 
 
@@ -74,11 +92,19 @@ def make_deepseek_llm(
     base_url: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    seed: int | None = None,
 ) -> Callable[[str], str]:
     """
     Ritorna llm_fn(prompt) -> testo, compatibile con FantasmaPipeline.
     La STESSA funzione serve sia per interpretare il codice fantasma (5.1)
     sia per generare l'output finale — stessa AI, due ruoli.
+
+    v0.04 P0: temperature/top_p/seed sono RICHIESTI al server e registrati
+    in llm_fn.params. Su modelli thinking possono essere ignorati dal
+    server: l'harness DEVE registrare richiesti-vs-effettivi e usare
+    >=3 ripetizioni + test appaiati. Mai affermare "deterministico".
     """
     cfg = get_config()
     _key = (api_key or cfg["api_key"]).strip()
@@ -87,6 +113,9 @@ def make_deepseek_llm(
     _effort = (reasoning_effort or cfg["reasoning_effort"]).strip()
     _system = (system or cfg["system"]).strip()
     _thinking = cfg["thinking"]
+    _temp = float(temperature) if temperature is not None else float(cfg.get("temperature", 0.0))
+    _top_p = float(top_p) if top_p is not None else float(cfg.get("top_p", 1.0))
+    _seed = seed if seed is not None else cfg.get("seed")
 
     if not _key:
         raise RuntimeError(
@@ -105,7 +134,7 @@ def make_deepseek_llm(
         testo = (prompt or "").strip()
         if not testo:
             return ""
-        resp = client.chat.completions.create(
+        kwargs: dict = dict(
             model=_model,
             messages=[
                 {"role": "system", "content": _system},
@@ -115,10 +144,19 @@ def make_deepseek_llm(
             reasoning_effort=_effort,
             extra_body={"thinking": {"type": _thinking}},
         )
+        # Parametri di sampling richiesti (v0.04): registrati, non garantiti.
+        kwargs["temperature"] = _temp
+        kwargs["top_p"] = _top_p
+        if _seed is not None:
+            kwargs["seed"] = _seed
+        resp = client.chat.completions.create(**kwargs)
         return (resp.choices[0].message.content or "").strip()
 
     # metadati utili per debug/audit (mai la chiave)
     llm_fn.__fantasma__ = {"base_url": _base, "model": _model, "reasoning_effort": _effort}  # type: ignore[attr-defined]
+    llm_fn.params = {"temperature": _temp, "top_p": _top_p, "seed": _seed,  # type: ignore[attr-defined]
+                     "reasoning_effort": _effort, "thinking": _thinking,
+                     "note": "richiesti, non garantiti su thinking"}
     return llm_fn
 
 

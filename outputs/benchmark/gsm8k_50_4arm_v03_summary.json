@@ -1,0 +1,29 @@
+{
+  "tag": "gsm8k_50_4arm_v03",
+  "n": 50,
+  "seed": 20261010,
+  "arms": [
+    "direct",
+    "hidden",
+    "fantasma",
+    "reformonly"
+  ],
+  "accuracy": {
+    "direct": 0.94,
+    "hidden": 0.9,
+    "fantasma": 0.94,
+    "reformonly": 0.92
+  },
+  "correct": {
+    "direct": 47,
+    "hidden": 45,
+    "fantasma": 47,
+    "reformonly": 46
+  },
+  "counted": {
+    "direct": 50,
+    "hidden": 50,
+    "fantasma": 50,
+    "reformonly": 50
+  }
+}

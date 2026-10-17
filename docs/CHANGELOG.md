@@ -1,5 +1,28 @@
 # Changelog — Il Fantasma
 
+## v0.06 (17/10/2026) — ri-centratura
+
+Prerequisiti del paper corretto v0.05 («prossima versione»): tre lavori al
+centro, zero scaffolding. (1) Nascita uniforme (r.115): `pipeline_v02` e
+`codec._to_numeric` non usano piu' `f"{b:03d}"` troncato (~49,5 bit
+effettivi, non 63,1): 19 cifre via `secret.digest_to_canonical_19`
+(rejection sampling), mai int/str dell'intero codice; determinismo
+(salt, nonce, input) intatto. (2) Blinding 128 bit (r.117): in
+`crypto.TimedCommitment` la `scrypt_hex` non e' piu' un attributo in
+chiaro (storage = hex XOR keystream da chiave monouso); `expire()`
+distrugge chiave di finestra E blinding (finally annidati); dopo, la
+property solleva `UseAfterDestroyError`: «senso unico dopo T» vale ora
+anche sull'artefatto. (3) Ciclo nominato: `CICLO_V006` esportato (input →
+CoT → emerge → agisce → scompare → doppio_catenaccio → output; CoT resta
+fase muta, output_produced resta la produzione — la consegna avviene dopo
+l'amnesia) + meta `fase` sugli eventi chiave; nel cover il wipe del
+mapping ora precede il bolt (la ricevuta e' emessa dalla morte).
+Test: `tests/test_v06_ri_centratura.py` (4: uniformita' con contrasto
+deterministico col vecchio schema, determinismo (salt, nonce, input),
+ordine del ciclo su run con cover, ricevute dalle morti + catena
+prev→entry) + `test_red_freeze.py` aggiornato (dopo expire `scrypt_hex`
+solleva). Suite: 147 passed (142 + 5).
+
 ## Correzione overcover (17/10/2026)
 
 Chiusura del gap citato nel paper corretto v0.05 (§6): aggiunti

@@ -31,7 +31,9 @@ La "scomparsa" v0.01 era **dichiarazione**: dalla v0.02 è
 1. Costo scrypt etichettato: ~44 ms/tentativo a regime; 13 cifre
    enumerabili (1 GPU ~3,2 anni, 100 GPU ~12 giorni — bandwidth-bound),
    19 cifre fuori portata. La difesa è l'entropia, non il per-core.
-2. Codice canonico 19 cifre + `TimedCommitment` con finestra T.
+2. Codice canonico 19 cifre + `TimedCommitment` con finestra T;
+   v0.06: `scrypt_hex` offuscata (blinding 128 bit), distrutta a
+   `expire()` — dopo, la property solleva `UseAfterDestroyError`.
 3. `SecretRegion` con memset in `__exit__` sempre; la pipeline usa il
    manager, `expose_mutable` resta API a basso livello documentata.
 

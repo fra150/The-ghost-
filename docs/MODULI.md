@@ -1,6 +1,6 @@
 # Moduli — riferimento (`src/fantasma/`)
 
-Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`.
+Versione package: `0.6.0-dev`. Tutti i simboli sono riesportati in `__init__.py`.
 
 ## Nucleo v0.02
 
@@ -14,7 +14,9 @@ Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`
 - **`crypto.py`** — `seal_with_key` / `open_with_key` (encrypt-then-MAC
   stdlib in-place, più wipabile di OpenSSL-C). `scrypt_commitment`
   (N=2¹⁴, r=8, p=1; ~44 ms/tentativo). `TimedCommitment` (finestra T:
-  verificabile via tag keyed, poi solo scrypt one-way). `SealedBlob`
+  verificabile via tag keyed; v0.06: `scrypt_hex` offuscata con blinding
+  128 bit, distrutto a `expire()` → property che solleva
+  `UseAfterDestroyError`). `SealedBlob`
   (ciphertext + nonce + tag). `CryptoShredder` (chiave monouso +
   `key_commitment` + `destroy()`). Costanti: `CODE_DIGITS_CANONICAL=19`
   (63,1 bit), `CODE_DIGITS_LEGACY=13`. Helper `entropy_bits`,
@@ -22,7 +24,8 @@ Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`
 - **`pipeline_v02.py`** — `FantasmaPipelineV02.process()` (vedi
   ARCHITETTURA), `FantasmaResultV02` (`algo =
   "stdlib-encrypt-then-MAC-SHA256+HMAC-SHA256/scrypt-audit"`),
-  `default_mock_llm_v02` (stessa-AI simulata: somma cifre % 3).
+  `default_mock_llm_v02` (stessa-AI simulata: somma cifre % 3),
+  `CICLO_V006` (v0.06: fasi del ciclo, meta `fase` sugli eventi chiave).
 - **`ghost_window.py`** — `ghost_window()` (guard rail no-fork Python,
   non barriera: il fork accidentale è vietato, spawn consigliato),
   `assert_no_fork_in_window`, `recommended_start_method`,
@@ -51,7 +54,8 @@ Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`
   `GateDecision(active, score, reason)`.
 - **`codec.py`** — `PrivateNumericCodec.generate()` → `GhostThought`
   (uid, numeric_code, vector), `build_interpret_prompt()`,
-  `INTERPRET_MARKER` (`FANTASMA-INTERPRETA`).
+  `INTERPRET_MARKER` (`FANTASMA-INTERPRETA`). v0.06: `_to_numeric` a
+  19 cifre uniformi (rejection sampling), niente più troncamento.
 - **`memory.py`** — `EphemeralMemory` (put/forget/selective_reset),
   `ObfuscatedCache` (seal/clear; shift cifre da salt),
   `obfuscate_numeric` / `deobfuscate_numeric`.
@@ -88,3 +92,16 @@ Versione package: `0.5.0-dev`. Tutti i simboli sono riesportati in `__init__.py`
   lunghezza, intervallo pieno senza zeri iniziali), `reference_rates()`,
   `count_strict_spans()` (conteggi per tag, mai contenuto), CLI con
   `--corpus`. Conteggi: 2030/1956/1999 = 10,15%/9,8%/10,0%.
+
+## Ri-centratura v0.06
+
+- Nascita uniforme: `pipeline_v02` e `codec._to_numeric` derivano da
+  `secret.digest_to_canonical_19` (byte ≥ 250 scartati) — niente più
+  `f"{b:03d}"` troncato (~49,5 bit). Deterministico a parità di digest:
+  il fantasma resta legato a (salt, nonce, input).
+- `crypto.TimedCommitment`: storage offuscato (hex XOR keystream da
+  `OneTimeKey(16)`); `scrypt_hex` = property (de-offusca al volo);
+  `expire()` = doppio destroy (chiave di finestra + blinding).
+- `CICLO_V006` esportato da `fantasma`: input → CoT → emerge → agisce →
+  scompare → doppio_catenaccio → output; nel cover wipe→bolt (la ricevuta
+  è emessa dalla morte, non la sostituisce).

@@ -1,6 +1,10 @@
 """
-Il Fantasma — v0.02-dev framework
+Il Fantasma — v0.06-dev (ri-centratura)
 Strato di ragionamento interno: emerge, agisce, scompare.
+Ciclo CICLO_V006: input -> CoT -> emerge -> agisce -> scompare ->
+doppio_catenaccio -> output (produzione != consegna: il ritorno al
+chiamante avviene dopo l'amnesia). Nascita uniforme (rejection sampling)
+e blinding 128 bit distrutto a expire().
 
 Decisioni dr. Bulla: 5.1 stessa AI interpreta, 5.2 cache offuscata -> crypto-shredding,
 5.3 amnesia dopo output, 5.4 amnesia a distruzione di chiave. LLM: DeepSeek-V4.1-Flash.
@@ -25,7 +29,7 @@ from .pii_cover import CoverMapping, CoverResult, cover_text, cover_open_classes
 from .pii_cover import cf_ok, piva_ok, iban_ok, luhn_ok
 from .bolt import BoltRegistry, BoltReceipt, BoltState, UseAfterDestroyError
 from .arms import run_arm_reformonly_v04, run_arm_clear_v04, run_arm_random_v04, derived_code
-from .pipeline_v02 import FantasmaPipelineV02, FantasmaResultV02, default_mock_llm_v02
+from .pipeline_v02 import FantasmaPipelineV02, FantasmaResultV02, default_mock_llm_v02, CICLO_V006
 from .llm_ollama import make_ollama_llm, DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL
 from .bench_gsm8k_v03 import run_benchmark_v03, mcnemar, bootstrap_diff
 
@@ -111,6 +115,7 @@ __all__ = [
     "FantasmaPipelineV02",
     "FantasmaResultV02",
     "default_mock_llm_v02",
+    "CICLO_V006",
     "make_ollama_llm",
     "OLLAMA_DEFAULT_MODEL",
     "run_benchmark_v03",
@@ -118,4 +123,4 @@ __all__ = [
     "bootstrap_diff",
 ]
 
-__version__ = "0.5.0-dev"
+__version__ = "0.6.0-dev"

@@ -38,8 +38,9 @@ class AuditLogger:
     Hash-chain invariata (compatibile v0.01). Novita' v0.02:
     - payload dei ghost = scrypt (memory-hard), MAI HMAC nudo su 43 bit;
     - verifica keyed solo entro la finestra T via TimedCommitment (vedi crypto);
-      dopo expire resta solo scrypt one-way (a 19 cifre) — paradosso risolto,
-      non aggirato: 'verificabile entro T, senso unico dopo T'.
+      paradosso risolto, non aggirato: 'verificabile entro T, senso unico dopo T'.
+    v0.06: dopo expire chiave di finestra e blinding 128 bit sono distrutti;
+      nemmeno la scrypt_hex e' ricostruibile (property -> UseAfterDestroyError).
     """
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []

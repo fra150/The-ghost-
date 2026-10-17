@@ -3,13 +3,16 @@
 Prova con codice (non speranza):
 - costo per tentativo misurato a regime (non prima chiamata);
 - invertibile a 13 cifre vs non-invertibile a 19 (demo su spazio piccolo + matematica);
-- finestra temporale: verificabile entro T, senso unico dopo expire.
+- finestra temporale: verificabile entro T, senso unico dopo expire
+  (v0.06: anche la scrypt_hex e' irraggiungibile dopo expire — blinding 128 bit).
 """
 
 import gc
 import sys
 import time
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -21,6 +24,7 @@ from fantasma.crypto import (  # noqa: E402
     enumerate_years,
     scrypt_commitment,
 )
+from fantasma.bolt import UseAfterDestroyError  # noqa: E402
 from fantasma.secret import OneTimeKey, SecretRegion  # noqa: E402
 
 
@@ -88,11 +92,34 @@ def test_finestra_temporale_verificabile_poi_senso_unico():
     assert tc.verify_within_window(code) is True
     assert tc.verify_within_window(b"9999999999999999999") is False
     assert tc.is_expired is False
+    # entro T la scrypt_hex e' de-offuscata al volo ed e' coerente
+    assert scrypt_commitment(code, tc.audit_salt) == tc.scrypt_hex
     tc.expire()
     assert tc.is_expired is True
-    # dopo expire: keyed non verifica piu', resta solo scrypt one-way (ricalcolabile)
+    # dopo expire: keyed non verifica piu' e la scrypt_hex non e' piu'
+    # ricostruibile (blinding 128 bit distrutto, v0.06): senso unico vero.
     assert tc.verify_within_window(code) is False
-    assert scrypt_commitment(code, tc.audit_salt) == tc.scrypt_hex
+    with pytest.raises(UseAfterDestroyError):
+        _ = tc.scrypt_hex
+    del tc
+    gc.collect()
+
+
+def test_blinding_128_bit_nasce_vive_e_muore_con_expire():
+    code = b"2468013579246801357"
+    tc = TimedCommitment(code, window_seconds=60.0)
+    raw = scrypt_commitment(code, tc.audit_salt)
+    # vivo: la property de-offusca e restituisce il valore giusto
+    assert tc.scrypt_hex == raw
+    # lo storage e' offuscato: l'hex in chiaro non e' conservato
+    assert bytes(tc._blinded) != raw.encode("ascii")  # noqa: SLF001
+    assert tc._blinding.is_destroyed is False  # noqa: SLF001
+    tc.expire()
+    # morto: il blinding e' distrutto, la ricostruzione solleva, verify resta False
+    assert tc._blinding.is_destroyed is True  # noqa: SLF001
+    with pytest.raises(UseAfterDestroyError):
+        _ = tc.scrypt_hex
+    assert tc.verify_within_window(code) is False
     del tc
     gc.collect()
 

@@ -12,6 +12,9 @@ Punti rossi chiusi con codice (revisione pre-print):
    (fuori portata anche a 100 GPU). Su 43 bit verificabile e non-invertibile
    sono mutuamente esclusivi: o alzi a 19 (senso unico vero) o dichiari la
    finestra T (verificabile entro T, senso unico dopo T). Qui entrambe.
+   v0.06: la scrypt_hex in chiaro era l'ultimo residuo verificabile senza
+   chiave; ora e' offuscata (blinding 128 bit) e il blinding muore con
+   expire(). "Senso unico dopo T" vale ora anche sull'artefatto.
 3. Chiave in buffer mutabile + SecretRegion: wipe per costruzione via ctypes,
    anche su eccezione/return. expose_mutable resta API basso livello.
 
@@ -114,46 +117,86 @@ class TimedCommitment:
     """
     Finestra temporale dichiarata (punto rosso 2b + Visione 'limiti temporali').
     - Entro T: verificabile via tag keyed (chiave di finestra viva) + scrypt;
-    - Dopo T (expire): chiave distrutta con memset, resta solo scrypt one-way.
-    A 13 cifre l'audit e' verificabile entro T ma enumerabile; a 19 cifre
-    e' a senso unico anche dopo. La sezione distingue le due frasi.
+    - Dopo T (expire): chiave di finestra E blinding distrutti con memset;
+      resta solo l'artefatto cieco, senza via di ricostruzione.
+    v0.06 (prerequisito paper r.117): la scrypt_hex non e' piu' un attributo
+    in chiaro. Storage = hex XOR keystream da un blinding monouso di 128 bit;
+    `scrypt_hex` e' una property che de-offusca al volo e solleva
+    UseAfterDestroyError dopo expire (o su blinding distrutto). A 13 cifre
+    l'audit e' verificabile entro T ma enumerabile; a 19 cifre e' a senso
+    unico anche dopo.
     """
 
     def __init__(self, code: bytes | bytearray, window_seconds: float = 3600.0) -> None:
         from .secret import OneTimeKey as _OTK
 
         self._window_key = _OTK(32)
+        self._blinding = _OTK(16)  # v0.06: blinding monouso 128 bit
         self.audit_salt = secrets.token_bytes(16)
-        self.scrypt_hex = scrypt_commitment(code, self.audit_salt)
+        raw = scrypt_commitment(code, self.audit_salt)
+        # storage offuscato: hex ASCII XOR keystream dal blinding
+        ks = bytearray(len(raw))
+        try:
+            with self._blinding.region() as b_mut:
+                _keystream_into(b_mut, self.audit_salt, ks)
+            self._blinded = bytearray(a ^ b for a, b in zip(raw.encode("ascii"), bytes(ks)))
+        finally:
+            for i in range(len(ks)):
+                ks[i] = 0x00
+            del ks
         self.key_id = self._window_key.commitment[:16]
         self.expires_at = time.time() + float(window_seconds)
         self._expired = False
         self._tag = hmac.new(
-            self._window_key.expose(), self.scrypt_hex.encode(), hashlib.sha256
+            self._window_key.expose(), raw.encode("ascii"), hashlib.sha256
         ).hexdigest()
-        # wipa subito la copia esposta
+        del raw
+        # wipa subito la copia esposta della chiave di finestra
         tmp = self._window_key.expose_mutable()
         for i in range(len(tmp)):
             tmp[i] = 0x00
         del tmp
 
+    @property
+    def scrypt_hex(self) -> str:
+        """De-offusca al volo l'impegno. Dopo expire il blinding e' distrutto."""
+        if self._blinding.is_destroyed:
+            from .bolt import UseAfterDestroyError
+
+            raise UseAfterDestroyError(
+                "Blinding distrutto: l'impegno non e' piu' ricostruibile (senso unico)."
+            )
+        ks = bytearray(len(self._blinded))
+        try:
+            with self._blinding.region() as b_mut:
+                _keystream_into(b_mut, self.audit_salt, ks)
+            return bytes(a ^ b for a, b in zip(bytes(self._blinded), bytes(ks))).decode("ascii")
+        finally:
+            for i in range(len(ks)):
+                ks[i] = 0x00
+            del ks
+
     def verify_within_window(self, code: bytes | bytearray) -> bool:
-        """True solo se entro T, chiave viva, scrypt e tag coincidono."""
-        if self._expired or self._window_key.is_destroyed:
+        """True solo se entro T, chiave e blinding vivi, scrypt e tag coincidono."""
+        if self._expired or self._window_key.is_destroyed or self._blinding.is_destroyed:
             return False
         if time.time() > self.expires_at:
             return False
-        if scrypt_commitment(code, self.audit_salt) != self.scrypt_hex:
+        sha = self.scrypt_hex
+        if scrypt_commitment(code, self.audit_salt) != sha:
             return False
         expect = hmac.new(
-            self._window_key.expose(), self.scrypt_hex.encode(), hashlib.sha256
+            self._window_key.expose(), sha.encode(), hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(expect, self._tag)
 
     def expire(self) -> None:
-        """Chiude la finestra: memset della chiave. Dopo, solo scrypt one-way."""
+        """Chiude la finestra: memset chiave di finestra + blinding. Dopo, solo artefatto cieco."""
         try:
-            self._window_key.destroy()
+            try:
+                self._window_key.destroy()
+            finally:
+                self._blinding.destroy()
         finally:
             self._expired = True
 

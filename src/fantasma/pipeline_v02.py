@@ -12,6 +12,15 @@ Punto delicato dichiarato (vedi SecretBytes.decode_at_boundary):
 la decode a str per la stessa-AI crea copie immutabili (str/JSON/HTTP/TLS)
 non wipabili. L1 si misura negli store, L2 si misura con scan_process_mem
 su Linux. Nessun claim finche' non misurato.
+
+v0.06 (ri-centratura, prerequisiti paper r.115/r.117):
+- nascita uniforme: digest -> secret.digest_to_canonical_19 (rejection
+  sampling), niente piu' f"{b:03d}" troncato ne' buffer intermedi;
+- ciclo nominato: CICLO_V006 + meta {"fase": ...} sugli eventi chiave;
+  output_produced resta dov'e' (produzione != consegna: il ritorno al
+  chiamante avviene dopo l'amnesia, il ciclo lo legge in coda);
+- cover: il wipe del mapping precede il bolt (la ricevuta e' emessa
+  dalla morte, non la sostituisce).
 """
 
 from __future__ import annotations
@@ -31,7 +40,7 @@ from .crypto import CryptoShredder
 from .gate import HeuristicGate
 from .ghost_window import ghost_window
 from .hygiene import apply_process_hygiene, lock_secret_region
-from .secret import SecretBytes
+from .secret import SecretBytes, digest_to_canonical_19
 
 
 def default_mock_llm_v02(prompt: str) -> str:
@@ -58,9 +67,12 @@ def _hmac_digest(nonce: str, text: str, salt: bytes) -> bytes:
     return hmac.new(salt, f"{nonce}:{text}".encode("utf-8"), hashlib.sha256).digest()
 
 
-def _digest_to_numeric_bytes(digest: bytes, n_digits: int = 19) -> bytes:
-    cifre = "".join(f"{b:03d}" for b in digest)
-    return cifre[:n_digits].encode("ascii")
+# v0.06 ciclo nominato (ri-centratura): le fasi del fantasma. I meta
+# {"fase": ...} sugli eventi d'audit usano questi nomi. "CoT" e' la fase
+# muta per definizione: il pensiero privato non genera evento (nasce e
+# resta segreto); l'evento ghost_activated e' il suo "emerge".
+CICLO_V006 = ("input", "CoT", "emerge", "agisce", "scompare",
+              "doppio_catenaccio", "output")
 
 
 @dataclass
@@ -107,7 +119,8 @@ class FantasmaPipelineV02:
     def process(self, user_input: str) -> FantasmaResultV02:
         """Punto d'ingresso. Con cover_pii=True l'input e' coperto pre-CoT
         (solo placeholder al modello) e l'output e' ripristinato in locale;
-        il mapping e' wipato e inchiodato al registro anche sui path d'errore."""
+        il mapping e' wipato e inchiodato al registro anche sui path d'errore.
+        v0.06: gli eventi chiave portano meta {"fase": ...} da CICLO_V006."""
         cover = None
         if self.cover_pii:
             from .pii_cover import cover_text as _cover_text
@@ -131,22 +144,30 @@ class FantasmaPipelineV02:
 
     def _cover_finish(self, out_covered: str, reform_covered: str,
                       cover: dict) -> tuple[str, str, dict]:
-        """Restore in locale + residual scan sul coperto + bolt + wipe."""
+        """Restore in locale + residual scan + wipe del mapping + bolt.
+
+        v0.06: il wipe esplicito precede il bolt — la ricevuta e' emessa
+        dalla morte del mapping, non la sostituisce. Il wipe nel finally
+        resta come rete idempotente (secondo wipe -> False)."""
         mp = cover["mapping"]
         try:
             residual = mp.values_present_in(out_covered)
             out = mp.restore(out_covered)
             reform = mp.restore(reform_covered)
+            wiped_now = mp.wipe()
             receipt, first = self.bolts.bolt("cover:" + cover["uid"])
             self.audit.log("cover_restored",
                            AuditLogger.hash_text(out_covered),
-                           meta={"residual_n": len(residual)})
+                           meta={"residual_n": len(residual),
+                                 "mapping_wiped": wiped_now})
             self.audit.log("cover_bolted", receipt.entry_hash,
                            meta={"uid_hash": "cover:" + cover["uid"],
-                                 "n": receipt.n, "first": first})
+                                 "n": receipt.n, "first": first,
+                                 "fase": "doppio_catenaccio"})
             meta = {"cover": True, "cover_report": cover["report"],
                     "cover_residual_n": len(residual),
                     "cover_residual": residual,
+                    "mapping_wiped": wiped_now,
                     "bolt_cover": receipt.to_dict(),
                     "bolt_cover_first": first}
             return out, reform, meta
@@ -163,7 +184,8 @@ class FantasmaPipelineV02:
         work_text = testo
         if _cover is not None:
             work_text = _cover["work_text"]
-        self.audit.log("input_received", AuditLogger.hash_text(work_text))
+        self.audit.log("input_received", AuditLogger.hash_text(work_text),
+                       meta={"fase": "input"})
         decisione = self.gate.should_activate(work_text)
         self.audit.log(
             "gate_decision",
@@ -207,9 +229,13 @@ class FantasmaPipelineV02:
         with ghost_window():
             nonce = uuid.uuid4().hex
             digest = _hmac_digest(nonce, work_text, self.salt)
-            raw_bytes = _digest_to_numeric_bytes(digest)
+            # v0.06 nascita uniforme (prerequisito r.115): 19 cifre per
+            # rejection sampling, mai int/str dell'intero codice.
+            # from_canonical_19 prende OWNERSHIP: niente copie ne' wipe qui.
+            code_buf = digest_to_canonical_19(digest)
             uid = uuid.uuid4().hex
-            secret = SecretBytes.from_bytes(raw_bytes)
+            secret = SecretBytes.from_canonical_19(code_buf)
+            del code_buf  # ownership trasferita: nessun alias al buffer vivo
             # mlock puntuale sulla regione (punto 1): report per-pagina
             # Il report dice 'regione designata protetta', NON 'nessuna copia in swap'.
             try:
@@ -219,12 +245,11 @@ class FantasmaPipelineV02:
                 self._last_lock = {"locked": False, "detail": "lock non riuscito"}
                 self.hygiene_report["last_lock"] = self._last_lock
             del digest
-            raw_bytes = b"\x00" * len(raw_bytes)
-            del raw_bytes
             self._live_secrets[uid] = secret
             impegno = secret.commitment()
             uid_hash = hashlib.sha256(uid.encode()).hexdigest()
-            self.audit.log("ghost_activated", impegno, meta={"uid_hash": uid_hash})
+            self.audit.log("ghost_activated", impegno,
+                           meta={"uid_hash": uid_hash, "fase": "emerge"})
 
             # 2. STESSA AI: un'unica decode al boundary (punto 6: finally+no traceback)
             # v0.04: prompt rigido condiviso + guard allowlist con 1 retry + fallback.
@@ -242,14 +267,16 @@ class FantasmaPipelineV02:
                 decoded = "0" * len(decoded)
                 del decoded
                 interpretation = self.llm_fn(prompt)
-                self.audit.log("ghost_interpreted", AuditLogger.hash_text(interpretation))
+                self.audit.log("ghost_interpreted", AuditLogger.hash_text(interpretation),
+                               meta={"fase": "agisce"})
                 _rep = _guard.validate_with_report(interpretation, work_text)
                 guard_report = _rep
                 if not _rep["ok"]:
                     # 1 retry su Call-1, mai passare sporco a Call-2
                     self.audit.log("leak_rejected_retry", AuditLogger.hash_text(_rep.get("reason", "")))
                     interpretation = self.llm_fn(prompt)
-                    self.audit.log("ghost_interpreted_retry", AuditLogger.hash_text(interpretation))
+                    self.audit.log("ghost_interpreted_retry", AuditLogger.hash_text(interpretation),
+                                   meta={"fase": "agisce"})
                     _rep2 = _guard.validate_with_report(interpretation, work_text)
                     guard_report = _rep2
                     if not _rep2["ok"]:
@@ -352,10 +379,14 @@ class FantasmaPipelineV02:
         riformulato_covered = (
             f"{interpretation.strip()}\nRichiesta originale: {work_text.strip()}"
         )
-        self.audit.log("reformulated", AuditLogger.hash_text(riformulato_covered))
+        self.audit.log("reformulated", AuditLogger.hash_text(riformulato_covered),
+                       meta={"fase": "agisce"})
         del interpretation
         out_covered = self.llm_fn(riformulato_covered)
-        self.audit.log("output_produced", AuditLogger.hash_text(out_covered), meta={"ghost": True})
+        # v0.06: "output" e' la produzione del testo; la consegna al
+        # chiamante avviene dopo l'amnesia (il ciclo lo legge in coda).
+        self.audit.log("output_produced", AuditLogger.hash_text(out_covered),
+                       meta={"ghost": True, "fase": "output"})
 
         # 5. amnesia totale: distruggi CHIAVE (shredding), svuota sealed
         # v0.04 catenaccio: wipe idempotente ma registrato + ricevuta in
@@ -363,14 +394,17 @@ class FantasmaPipelineV02:
         already_gone = shredder.is_destroyed
         shredder.destroy()
         self._sealed.clear()
-        self.audit.log("ghost_erased", AuditLogger.hash_text(uid + ":erased"))
+        self.audit.log("ghost_erased", AuditLogger.hash_text(uid + ":erased"),
+                       meta={"fase": "scompare"})
         receipt, first_bolt = self.bolts.bolt(uid_hash)
         if already_gone:
             self.audit.log("bolt_rewipe", receipt.entry_hash,
-                           meta={"uid_hash": uid_hash, "first": False})
+                           meta={"uid_hash": uid_hash, "first": False,
+                                 "fase": "doppio_catenaccio"})
         self.audit.log("bolted", receipt.entry_hash,
                        meta={"uid_hash": uid_hash, "n": receipt.n,
-                             "first": first_bolt})
+                             "first": first_bolt,
+                             "fase": "doppio_catenaccio"})
 
         # cancella residui locali
         del shredder

@@ -16,15 +16,15 @@ il  fatasma/
 │
 ├── src/fantasma/              framework — v0.2.0-dev
 │   ├── __init__.py            export pubblici + __version__
-│   ├── pipeline_v02.py        pipeline canonica v0.02 (.process(), ghost→stessa-AI→seal→amnesia)
+│   ├── pipeline_v02.py        pipeline canonica (.process(), ciclo CICLO_V006, cover, amnesia)
 │   ├── pipeline.py            pipeline v0.01 (cache offuscata Cesare, tenuta per confronto)
 │   ├── secret.py              SecretBytes / OneTimeKey / SecretRegion (base L1+L2)
-│   ├── crypto.py              seal/open encrypt-then-MAC, scrypt commitment, TimedCommitment
+│   ├── crypto.py              seal/open encrypt-then-MAC, scrypt commitment, TimedCommitment (+ blinding)
 │   ├── hygiene.py             apply_process_hygiene, lock/unlock regione (mlock puntuale)
 │   ├── forensics.py           canary runtime, varianti, scan mem/FS, R, evaluate_claim
 │   ├── ghost_window.py        finestra no-fork, scrub frame, release_traceback
 │   ├── gate.py                HeuristicGate / GateDecision (attiva o standby)
-│   ├── codec.py               PrivateNumericCodec / GhostThought / INTERPRET_MARKER (v0.01)
+│   ├── codec.py               PrivateNumericCodec / GhostThought / INTERPRET_MARKER (v0.06: cifre uniformi)
 │   ├── memory.py              EphemeralMemory / ObfuscatedCache (v0.01)
 │   ├── audit.py               AuditLogger hash-chain (solo hash, mai contenuti)
 │   ├── llm_deepseek.py        adapter DeepSeek-V4.1-Flash (make_deepseek_llm, ping)

@@ -14,6 +14,10 @@ con quello stato, in quel momento, vede solo cifre.
   AI rilegge il proprio codice (usato dalla pipeline).
 - interpret(): resta solo come accessor locale al vettore (fallback),
   la via ufficiale e' _interpret_via_same_ai nella pipeline.
+
+v0.06 (ri-centratura): _to_numeric non usa piu' f"{b:03d}" troncato
+(biasato, ~49,5 bit effettivi): deriva 19 cifre uniformi con rejection
+sampling via secret.digest_to_canonical_19 (byte >= 250 scartati).
 """
 
 from __future__ import annotations
@@ -24,6 +28,8 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from .secret import digest_to_canonical_19
 
 
 @dataclass
@@ -62,8 +68,16 @@ class PrivateNumericCodec:
         return hmac.new(salt, msg, hashlib.sha256).digest()
 
     def _to_numeric(self, digest: bytes) -> str:
-        cifre = "".join(f"{b:03d}" for b in digest)
-        return cifre[: self.code_digits]
+        # v0.06: rejection sampling uniforme (byte >= 250 scartati). Il
+        # vecchio f"{b:03d}" troncato era biasato (~49,5 bit effettivi,
+        # non 63,1). Il buffer resta wipabile e viene azzerato qui.
+        buf = digest_to_canonical_19(digest)
+        try:
+            return bytes(buf).decode("ascii")[: self.code_digits]
+        finally:
+            for i in range(len(buf)):
+                buf[i] = 0x00
+            del buf
 
     def _to_vector(self, digest: bytes) -> list[float]:
         return [b / 255.0 for b in digest[: self.dim]]
